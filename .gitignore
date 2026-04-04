@@ -1,0 +1,54 @@
+# macOS
+.DS_Store
+
+# Editors/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Environment and local config
+.env
+.env.*
+*.local
+
+# AWS/VPN sensitive files
+*.pem
+*.key
+*.crt
+*.csr
+*.ovpn
+*.conf
+credentials
+aws-credentials*
+vpn-credentials*
+secrets*
+*.p12
+*.pfx
+
+# Terraform (if used)
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Python (if used)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node (if used)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
