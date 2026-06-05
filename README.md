@@ -1,28 +1,46 @@
-# AWS WireGuard VPN Server
+# WireGuard VPN Server — AWS & GCP
 
-Terraform configuration to deploy a self-hosted WireGuard VPN server on AWS Free Tier (Mumbai region, `ap-south-1`). Automatically provisions a `t2.micro` EC2 instance, installs WireGuard, and generates client configs + QR codes on first boot.
+Terraform configurations to deploy a self-hosted WireGuard VPN server on either **AWS** or **GCP**. Pick a provider by entering its directory. Both setups automatically install WireGuard and generate client configs + QR codes on first boot.
+
+```
+aws-vpn-setup/
+  aws/   ← deploy on AWS (ap-south-1, t2.micro, free tier eligible)
+  gcp/   ← deploy on GCP (asia-south1, e2-micro)
+```
 
 ## Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.3.0
-- AWS CLI configured with valid credentials (`aws configure`)
-- An existing EC2 Key Pair in the `ap-south-1` region
-- Your public IP address (find it at https://whatismyip.com)
 
-## Configuration
+**AWS:**
+- AWS CLI configured (`aws configure`)
+- An existing EC2 Key Pair in `ap-south-1`
 
-Edit `terraform.tfvars` before deploying:
+**GCP:**
+- `gcloud` CLI installed and authenticated:
+  ```bash
+  gcloud auth application-default login
+  ```
+- A GCP project with Compute Engine API enabled:
+  ```bash
+  gcloud services enable compute.googleapis.com --project=YOUR_PROJECT_ID
+  ```
+- Your SSH public key (e.g. `~/.ssh/id_rsa.pub`)
 
-```hcl
-# Name of your EC2 key pair (AWS Console → EC2 → Key Pairs)
-key_pair_name = "your-key-pair-name"
+---
 
-# Your public IP for SSH access — format: x.x.x.x/32
-your_home_ip = "1.2.3.4/32"
+## Deploy on AWS
 
-# Number of client configs to generate (1 per device, max 10)
-vpn_client_count = 1
+```bash
+cd aws/
+
+# Edit terraform.tfvars with your key pair name and home IP
+terraform init
+terraform plan
+terraform apply
 ```
+
+**`aws/terraform.tfvars` variables:**
 
 | Variable | Description | Default |
 |---|---|---|
@@ -30,68 +48,110 @@ vpn_client_count = 1
 | `your_home_ip` | Your public IP in CIDR notation for SSH | `0.0.0.0/0` |
 | `vpn_client_count` | Number of client configs to generate | `1` |
 
-> **Security note:** Set `your_home_ip` to your actual IP (`x.x.x.x/32`) to restrict SSH access. Leaving it as `0.0.0.0/0` opens SSH to the internet.
+**SSH command** (from Terraform output):
+```bash
+ssh -i ~/.ssh/your-key.pem ubuntu@<vpn_public_ip>
+```
 
-## Deploy
+---
+
+## Deploy on GCP
 
 ```bash
-# 1. Initialize Terraform
+cd gcp/
+
+# Edit terraform.tfvars with your project ID, home IP, and SSH public key
 terraform init
-
-# 2. Preview what will be created
 terraform plan
-
-# 3. Deploy (confirm with 'yes' when prompted)
 terraform apply
 ```
 
-After apply completes, Terraform prints your server's public IP and helper commands:
+**`gcp/terraform.tfvars` variables:**
 
-```
-vpn_public_ip     = "x.x.x.x"
-ssh_command       = "ssh -i ~/.ssh/your-key.pem ubuntu@x.x.x.x"
-view_client_config = "sudo cat /etc/wireguard/clients/client1.conf"
-show_qr_code      = "sudo qrencode -t ansiutf8 < /etc/wireguard/clients/client1.conf"
-wireguard_status  = "sudo wg show"
+| Variable | Description | Default |
+|---|---|---|
+| `project_id` | Your GCP project ID | *(required)* |
+| `region` | GCP region | `asia-south1` |
+| `zone` | GCP zone | `asia-south1-a` |
+| `your_home_ip` | Your public IP in CIDR notation for SSH | `0.0.0.0/0` |
+| `ssh_user` | Linux username to SSH as | `ubuntu` |
+| `ssh_public_key` | Contents of your public key file | *(required)* |
+| `vpn_client_count` | Number of client configs to generate | `1` |
+
+> **GCP free tier note:** The e2-micro free tier only applies in `us-central1` and `us-east1`. Using `asia-south1` (Mumbai) incurs normal compute charges (~$6/month).
+
+**SSH command** (from Terraform output):
+```bash
+ssh ubuntu@<vpn_public_ip>
 ```
 
-> WireGuard setup runs on first boot. Wait ~2 minutes after `terraform apply` before SSHing in.
+---
 
 ## Connect a Device
 
+After `terraform apply`, wait ~2 minutes for WireGuard to finish installing, then SSH in.
+
 ### Option A — QR Code (iOS / Android)
+```bash
+sudo qrencode -t ansiutf8 < /etc/wireguard/clients/client1.conf
+```
+Scan in the WireGuard mobile app.
 
-1. SSH into the server using the `ssh_command` output
-2. Run the `show_qr_code` command
-3. Scan the QR code in the WireGuard mobile app
+### Option B — Config File (Mac laptop)
 
-### Option B — Config File (Desktop)
+The client config is owned by root on the server, so copy it to your home directory first, then scp it down:
 
-1. SSH into the server
-2. Run the `view_client_config` command
-3. Copy the config to your local machine:
-   ```bash
-   scp -i ~/.ssh/your-key.pem ubuntu@<vpn_public_ip>:/etc/wireguard/clients/client1.conf ./client1.conf
-   ```
-4. Import `client1.conf` into the WireGuard desktop app
+```bash
+# On the server
+sudo cp /etc/wireguard/clients/client1.conf ~/client1.conf
+sudo chown ubuntu:ubuntu ~/client1.conf
 
-For multiple devices, repeat with `client2.conf`, `client3.conf`, etc. (up to `vpn_client_count`).
+# On your local machine
+scp -i /path/to/your-private-key ubuntu@<vpn_public_ip>:~/client1.conf ./client1.conf
+```
+
+Install WireGuard tools:
+```bash
+brew install wireguard-tools
+```
+
+Connect:
+```bash
+# macOS ships bash 3 but wg-quick requires bash 4+ — use Homebrew's bash explicitly
+sudo /opt/homebrew/bin/bash $(which wg-quick) up ./client1.conf
+```
+
+Disconnect:
+```bash
+sudo /opt/homebrew/bin/bash $(which wg-quick) down ./client1.conf
+```
+
+Verify you're on the VPN (should show the server's public IP):
+```bash
+curl ifconfig.me
+```
+
+For multiple devices use `client2.conf`, `client3.conf`, etc.
 
 ## Verify the VPN is Running
 
 ```bash
-# SSH in, then:
-sudo wg show          # shows active peers and traffic
+sudo wg show
 sudo systemctl status wg-quick@wg0
 ```
 
 ## Tear Down
 
 ```bash
+# From whichever directory you deployed from:
 terraform destroy
 ```
 
-This removes all AWS resources (EC2, VPC, EIP, security group). The Elastic IP is only free while the instance is running — destroy when not in use to avoid charges.
+---
+
+## Security Note
+
+Set `your_home_ip` to your actual IP (`x.x.x.x/32`) to restrict SSH access. Leaving it as `0.0.0.0/0` opens SSH to the internet.
 
 ## AWS Free Tier Usage
 
@@ -101,5 +161,3 @@ This removes all AWS resources (EC2, VPC, EIP, security group). The Elastic IP i
 | EBS storage | 30 GB/month | 8 GB |
 | Elastic IP | Free while instance runs | 1 EIP |
 | Data transfer out | 100 GB/month | Depends on usage |
-
-> Data transfer charges apply beyond 100 GB/month. VPN traffic counts toward this limit.
